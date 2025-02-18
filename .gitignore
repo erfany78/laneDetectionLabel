@@ -1,0 +1,33 @@
+# Ignore Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+venv/
+.env/
+*.env
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore log files
+logs/
+*.log
+
+# Ignore data files
+labeled_data/
+*.txt
+
+# Ignore IDE-specific files
+.vscode/
+.idea/
+*.iml
+
+# Ignore Jupyter Notebook checkpoints (if used)
+.ipynb_checkpoints/
+
+# Ignore dependencies if using virtual environments
+pip-wheel-metadata/

@@ -3,7 +3,7 @@ import os
 import numpy as np
 
 # Constants
-NUM_POINTS = 10
+NUM_POINTS = 6
 LABELS_DIR = "labeled_data"
 IMAGE_DIR = "dataset_xy"
 ROAD_TYPES = ["Regular Road", "Crossroad"]

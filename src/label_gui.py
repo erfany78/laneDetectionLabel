@@ -4,9 +4,10 @@ import numpy as np
 from src.data_loader import load_label, save_label
 
 # Constants
-NUM_POINTS = 10
+NUM_POINTS = 9
 IMAGE_DIR = os.path.join(os.path.dirname(__file__), "../dataset_xy")
 ROAD_TYPES = ["Regular Road", "Crossroad"]
+OFFSET = 66  # Offset of 66 pixels for both sides
 
 # Global variables
 points = []
@@ -17,17 +18,56 @@ image_files = []
 current_idx = 0
 
 def draw_ui(image):
-    """Draws road type text and labeled points on the image."""
-    display_image = image.copy()
-    cv2.putText(display_image, f"Road Type: {ROAD_TYPES[road_type]}", (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+    """Draws road type text, labeled points, and three horizontal lines on the image."""
+    height, width, _ = image.shape
 
-    height, width, _ = display_image.shape
-    for x, y, _ in points:
+    # Create a black background larger than the original image
+    black_background = np.zeros((height + 2 * OFFSET, width + 2 * OFFSET, 3), dtype=np.uint8)
+
+    # Place the original image at the center of the black background
+    black_background[OFFSET:OFFSET+height, OFFSET:OFFSET+width] = image
+
+    # Add road type text on the black background
+    cv2.putText(black_background, f"Type: {ROAD_TYPES[road_type]}", (10, 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+
+    # Draw three horizontal lines to help position the points
+    # Line 1: at 25% height of the image
+    line_y1 = int(height * 0.45) + OFFSET
+    cv2.line(black_background, (0, line_y1), (width + OFFSET, line_y1), (0, 255, 255), 2)  # Yellow
+
+    # Line 2: at 50% height of the image (middle line)
+    line_y2 = int(height * 0.65) + OFFSET
+    cv2.line(black_background, (0, line_y2), (width + OFFSET, line_y2), (255, 255, 0), 2)  # Cyan
+
+    # Line 3: at 75% height of the image
+    line_y3 = int(height * 0.90 ) + OFFSET
+    cv2.line(black_background, (0, line_y3), (width + OFFSET, line_y3), (0, 255, 0), 2)  # Green
+
+    # Loop through the points and check if they are inside the visible area of the image
+    for index, (x, y, _) in enumerate(points):  # Add index to track position
         if x != 0 and y != 0:
-            cv2.circle(display_image, (int(x * width / 2 + width / 2), int(y * height / 2 + height / 2)),
-                       5, (0, 0, 255), -1)
-    return display_image
+            # Apply colors based on index
+            if index < 3:
+                color = (255, 0, 0)  # Blue for first 3 points
+            elif index < 6:
+                color = (0, 255, 0)  # Green for next 3 points
+            else:
+                color = (0, 0, 255)  # Red for last 3 points
+
+            # Map normalized points (-1 to 1) to pixel values for image coordinates
+            x_offset = int((x + 1) * (width / 2))  # Convert to image coordinates and apply offset
+            y_offset = int((y + 1) * (height / 2))
+
+            # Check if the point is within the visible bounds of the original image
+            if OFFSET <= x_offset < width + OFFSET and OFFSET <= y_offset < height + OFFSET:
+                # If visible, fill the point
+                cv2.circle(black_background, (x_offset, y_offset), 5, color, -1)
+            else:
+                # If invisible, outline the point
+                cv2.circle(black_background, (x_offset, y_offset), 5, color, 2)
+
+    return black_background
 
 def click_event(event, x, y, flags, param):
     """Handles mouse clicks for adding/removing lane points."""

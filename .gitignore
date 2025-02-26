@@ -31,3 +31,9 @@ labeled_data/
 
 # Ignore dependencies if using virtual environments
 pip-wheel-metadata/
+
+# Ignore dataset files
+dataset/
+
+output/
+

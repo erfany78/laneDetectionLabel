@@ -38,12 +38,20 @@ python src/label_guiV2.py
 |                                                                     |
 |      [BLACK OFFSET AREA]     [IMAGE DISPLAY AREA]   [BLACK OFFSET]  |
 |                                                                     |
-|                                ●1                                   |
+|                                ●2                                   |
 |                                 \                                   |
 |                                  \                                  |
-|                                   ●2                                |
-|                                    \                                |
-|                                     ●3    [Lane points with         |
+|                                   ●3                                |
+|                                    \ 
+                                   |  \
+                                       ●4
+                                        \
+                                         \
+                                          ●5
+                                           \
+                                            \
+                                             ●1
+|                                         [Lane points with         |
 |                                           angle, distance info]     |
 |                                                                     |
 |                                                                     |

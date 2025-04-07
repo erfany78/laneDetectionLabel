@@ -27,15 +27,18 @@ class LabelGUI:
     OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../output")
     ROAD_TYPES = ["Regular Road", "RIGHT OUT OF ROAD", "LEFT OUT OF ROAD", 
                   "OUT", "Crossroad", "T-Junction"]
-    MAX_POINTS = 5
-    OFFSET_WIDTH = 200  # Width of black offset area on each side for invisible points
+    MAX_POINTS = 5  # Maximum points per lane
+    MAX_LANES = 2   # Maximum number of lanes
+    LANE_COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]  # Different color for each lane
+    OFFSET_WIDTH = 320  # Width of black offset area on each side for invisible points
     INPUT_SIZE = (640, 640)  # Width, Height for display/working image
     OUTPUT_SIZE = (224, 224)  # Width, Height for output image
 
     def __init__(self) -> None:
         """Initialize the LabelGUI application with default values."""
         # Instance variables
-        self.points: List[List[int]] = []  # Stores points added by the user in pixel coordinates
+        self.points: List[List[List[int]]] = [[] for _ in range(self.MAX_LANES)]  # List of lanes, each containing points
+        self.current_lane = 0  # Currently active lane index
         self.road_type: int = 0
         self.current_image: Optional[np.ndarray] = None
         self.image_path: Optional[str] = None
@@ -130,18 +133,24 @@ class LabelGUI:
         cv2.putText(black_background, f"Input: {self.INPUT_SIZE[0]}x{self.INPUT_SIZE[1]}, Output: {self.OUTPUT_SIZE[0]}x{self.OUTPUT_SIZE[1]}", 
                    (width + 2 * self.OFFSET_WIDTH - 450, 20), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
+        
+        # Draw lane selection info
+        lane_text = f"Lane: {self.current_lane+1}/{self.MAX_LANES}"
+        cv2.putText(black_background, lane_text, (width + 2 * self.OFFSET_WIDTH - 450, 40), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.LANE_COLORS[self.current_lane], 1, cv2.LINE_AA)
 
         # Draw status in right corner - red if fewer than max points, green if max reached
-        points_color = (0, 255, 0) if len(self.points) >= self.MAX_POINTS else (0, 0, 255)
+        current_lane_points = len(self.points[self.current_lane])
+        points_color = (0, 255, 0) if current_lane_points >= self.MAX_POINTS else (0, 0, 255)
         cv2.rectangle(black_background, (width + 2 * self.OFFSET_WIDTH - 150, 20), 
                       (width + 2 * self.OFFSET_WIDTH - 10, 50), points_color, 1)
-        cv2.putText(black_background, f"Points: {len(self.points)}/{self.MAX_POINTS}", 
+        cv2.putText(black_background, f"Points: {current_lane_points}/{self.MAX_POINTS}", 
                    (width + 2 * self.OFFSET_WIDTH - 140, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
        
-        # Draw bezier curves between points
+        # Draw bezier curves between points for all lanes
         self._draw_curves(black_background, width + 2 * self.OFFSET_WIDTH, height)
         
-        # Draw points
+        # Draw points for all lanes
         self._draw_points(black_background, width + 2 * self.OFFSET_WIDTH, height)
 
         return black_background
@@ -155,46 +164,65 @@ class LabelGUI:
             width: Image width
             height: Image height
         """
-        # Draw arcs between each pair of points (Bezier curve)
-        for i in range(len(self.points) - 1):
-            try:
-                # Ensure we're using integer coordinates and add offset
-                p0 = (int(self.points[i][0]) + self.OFFSET_WIDTH, int(self.points[i][1]))  # Start point
-                p2 = (int(self.points[i + 1][0]) + self.OFFSET_WIDTH, int(self.points[i + 1][1]))  # End point
-
-                # Midpoint for the curve (control point)
-                p1 = ((p0[0] + p2[0]) / 2, (p0[1] + p2[1]) / 2)
-
-                # Draw the curve using multiple line segments
-                points_for_curve = []
-            
-                # for t in np.linspace(0, 1, 20):  # Generate 20 points for smooth curve
-                #     points_for_curve.append(self.bezier_curve(p0, p1, p2, t))
+        # Draw arcs for each lane
+        for lane_idx, lane_points in enumerate(self.points):
+            # Skip empty lanes
+            if len(lane_points) < 2:  # Need at least 2 points to draw a curve
+                continue
                 
-                # # Draw the curve
-                # for j in range(len(points_for_curve) - 1):
-                #     cv2.line(image, points_for_curve[j], points_for_curve[j + 1], (0, 0, 255), 2)
+            # Get lane color
+            lane_color = self.LANE_COLORS[lane_idx % len(self.LANE_COLORS)]
+            
+            # Draw arcs between each pair of points in the lane
+            for i in range(len(lane_points) - 1):
+                try:
+                    # Ensure we're using integer coordinates and add offset
+                    p0 = (int(lane_points[i][0]) + self.OFFSET_WIDTH, int(lane_points[i][1]))  # Start point
+                    p2 = (int(lane_points[i + 1][0]) + self.OFFSET_WIDTH, int(lane_points[i + 1][1]))  # End point
 
-                # Only draw the first curve with extra indicators
-                if i == 0:
-                    curve_points = []
-                    for t in np.linspace(0, 1, 5):  # Generate 5 points along the curve
-                        curve_points.append(self.bezier_curve(p0, p1, p2, t))
+                    # Midpoint for the curve (control point)
+                    p1 = ((p0[0] + p2[0]) / 2, (p0[1] + p2[1]) / 2)
 
-                    # Draw the generated curve points
-                    for idx, point in enumerate(curve_points):
-                        x_offset, y_offset = point
+                    # Draw the curve for the current lane
+                    # Active lane gets full curve, other lanes get dashed curve
+                    if lane_idx == self.current_lane:
+                        # For the active lane, draw full curve
+                        curve_points = []
+                        # for t in np.linspace(0, 1, 20):  # Generate 20 points for smooth curve
+                        #     curve_points.append(self.bezier_curve(p0, p1, p2, t))
                         
-                        if 0 <= x_offset < width and 0 <= y_offset < height:
-                            # Draw horizontal guideline if appropriate
-                            if len(self.points) == self.MAX_POINTS - idx and len(self.points) < self.MAX_POINTS and self.road_type <3 :
-                                cv2.line(image, (0, y_offset), (width, y_offset), (255, 255, 0))
-                                pass
-                        else:
-                            # If point is outside visible area, just outline it
-                            cv2.circle(image, (int(x_offset), int(y_offset)), 5, (255, 255, 0), 2)
-            except Exception as e:
-                print(f"Error drawing arc: {e}")
+                        # # Draw the curve
+                        # for j in range(len(curve_points) - 1):
+                        #     cv2.line(image, curve_points[j], curve_points[j + 1], lane_color, 2)
+
+                        # Only draw the first curve with extra indicators
+                        if i == 0:
+                            curve_points = []
+                            for t in np.linspace(0, 1, 5):  # Generate 5 points along the curve
+                                curve_points.append(self.bezier_curve(p0, p1, p2, t))
+
+                            # Draw the generated curve points
+                            for idx, point in enumerate(curve_points):
+                                x_offset, y_offset = point
+                                
+                                if 0 <= x_offset < width and 0 <= y_offset < height:
+                                    # Draw horizontal guideline if appropriate
+                                    if len(lane_points) == self.MAX_POINTS - idx and len(lane_points) < self.MAX_POINTS and self.road_type < 3:
+                                        cv2.line(image, (0, y_offset), (width, y_offset), (255, 255, 0))
+                                else:
+                                    # If point is outside visible area, just outline it
+                                    cv2.circle(image, (int(x_offset), int(y_offset)), 5, (255, 255, 0), 2)
+                    else:
+                        # For inactive lanes, draw dashed curve
+                        curve_points = []
+                        for t in np.linspace(0, 1, 10):  # Generate 10 points for dashed curve
+                            curve_points.append(self.bezier_curve(p0, p1, p2, t))
+                        
+                        # Draw dashed curve (every other segment)
+                        for j in range(0, len(curve_points) - 1, 2):
+                            cv2.line(image, curve_points[j], curve_points[j + 1], lane_color, 1)
+                except Exception as e:
+                    print(f"Error drawing arc for lane {lane_idx}: {e}")
     
     def _draw_points(self, image: np.ndarray, width: int, height: int) -> None:
         """
@@ -207,46 +235,55 @@ class LabelGUI:
         """
         original_width = width - 2 * self.OFFSET_WIDTH
         
-        # Loop through the points and draw them
-        for index, point in enumerate(self.points):
-            try:
-                # Make sure we have proper integer coordinates with offset
-                x = int(point[0]) + self.OFFSET_WIDTH
-                y = int(point[1])
-                
-                if x != self.OFFSET_WIDTH or y != 0:  # Skip (0,0) points
-                    # Apply colors based on index
-                    color = (255, 0, 0) if index < 2 else (0, 255, 0)  # Blue for first point, Green for subsequent
-
-                    # Check if the point is within the original image area
-                    in_original_area = self.OFFSET_WIDTH <= x < self.OFFSET_WIDTH + original_width and 0 <= y < height
+        # Loop through all lanes
+        for lane_idx, lane_points in enumerate(self.points):
+            # Get lane color
+            lane_color = self.LANE_COLORS[lane_idx % len(self.LANE_COLORS)]
+            
+            # Loop through the points in this lane
+            for index, point in enumerate(lane_points):
+                try:
+                    # Make sure we have proper integer coordinates with offset
+                    x = int(point[0]) + self.OFFSET_WIDTH
+                    y = int(point[1])
                     
-                    if in_original_area:
-                        # If visible in original image, fill the point
-                        cv2.circle(image, (x, y), 5, color, -1)
-                    else:
-                        # If in offset area, draw outlined point with connection line
-                        cv2.circle(image, (x, y), 5, color, 2)
+                    if x != self.OFFSET_WIDTH or y != 0:  # Skip (0,0) points
+                        # Check if the point is within the original image area
+                        in_original_area = self.OFFSET_WIDTH <= x < self.OFFSET_WIDTH + original_width and 0 <= y < height
                         
-                        # Draw dashed connection line to edge of original image
-                        if x < self.OFFSET_WIDTH:  # Point is in left offset
-                            edge_x = self.OFFSET_WIDTH
-                            for i in range(0, self.OFFSET_WIDTH - x, 10):
-                                cv2.line(image, (x + i, y), (x + i + 5, y), color, 1)
-                        elif x >= self.OFFSET_WIDTH + original_width:  # Point is in right offset
-                            edge_x = self.OFFSET_WIDTH + original_width - 1
-                            for i in range(0, x - edge_x, 10):
-                                cv2.line(image, (edge_x + i, y), (edge_x + i + 5, y), color, 1)
-                    
-                    # Display angle and distance for non-reference points
-                    if index > 0 and len(point) >= 5:
-                        angle = point[3]
-                        distance = point[4]
-                        text = f"{angle:.1f}, {distance:.0f}px"
-                        cv2.putText(image, text, (x + 10, y), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-            except Exception as e:
-                print(f"Error drawing point {index}: {e}")
+                        # Determine point style
+                        fill = -1 if lane_idx == self.current_lane else 1  # Filled circle for active lane
+                        
+                        if in_original_area:
+                            # If visible in original image, draw the point
+                            cv2.circle(image, (x, y), 5, lane_color, fill)
+                            # Add point number for current lane
+                            if lane_idx == self.current_lane:
+                                cv2.putText(image, f"{index+1}", (x-3, y+3), 
+                                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+                        else:
+                            # If in offset area, draw outlined point with connection line
+                            cv2.circle(image, (x, y), 5, lane_color, 2)
+                            
+                            # Draw dashed connection line to edge of original image
+                            if x < self.OFFSET_WIDTH:  # Point is in left offset
+                                edge_x = self.OFFSET_WIDTH
+                                for i in range(0, self.OFFSET_WIDTH - x, 10):
+                                    cv2.line(image, (x + i, y), (x + i + 5, y), lane_color, 1)
+                            elif x >= self.OFFSET_WIDTH + original_width:  # Point is in right offset
+                                edge_x = self.OFFSET_WIDTH + original_width - 1
+                                for i in range(0, x - edge_x, 10):
+                                    cv2.line(image, (edge_x + i, y), (edge_x + i + 5, y), lane_color, 1)
+                        
+                        # Display angle and distance for non-reference points on active lane
+                        if lane_idx == self.current_lane and index > 0 and len(point) >= 5:
+                            angle = point[3]
+                            distance = point[4]
+                            text = f"{angle:.1f}, {distance:.0f}px"
+                            cv2.putText(image, text, (x + 10, y), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                except Exception as e:
+                    print(f"Error drawing point {index} in lane {lane_idx}: {e}")
 
     def click_event(self, event: int, x: int, y: int, flags: int, param: Any) -> None:
         """
@@ -264,7 +301,8 @@ class LabelGUI:
             
         if event == cv2.EVENT_LBUTTONDOWN:
             # Check if the number of points is less than max before adding a new point
-            if len(self.points) < self.MAX_POINTS:
+            current_lane_points = self.points[self.current_lane]
+            if len(current_lane_points) < self.MAX_POINTS:
                 # Adjust x coordinate to account for offset
                 adjusted_x = x - self.OFFSET_WIDTH
                 
@@ -276,32 +314,50 @@ class LabelGUI:
                 new_point = [adjusted_x, int(y), visibility]
                 
                 # Calculate angle and distance if this isn't the first point
-                if len(self.points) > 0:
-                    reference_point = (self.points[0][0], self.points[0][1])
+                if len(current_lane_points) > 0:
+                    reference_point = (current_lane_points[0][0], current_lane_points[0][1])
                     angle, distance = self.calculate_angle_distance(reference_point, (adjusted_x, y))
                     new_point.extend([angle, distance])
-                    print(f"Point {len(self.points)+1} added: ({adjusted_x}, {y}) - Angle: {angle:.2f}°, Distance: {distance:.2f}px")
+                    print(f"Lane {self.current_lane+1}, Point {len(current_lane_points)+1} added: ({adjusted_x}, {y}) - Angle: {angle:.2f}°, Distance: {distance:.2f}px")
                 else:
                     # First point is the reference, angle and distance are 0
                     new_point.extend([0.0, 0.0])
-                    print(f"Reference point added: ({adjusted_x}, {y})")
+                    print(f"Lane {self.current_lane+1}, Reference point added: ({adjusted_x}, {y})")
                 
-                self.points.append(new_point)
-
+                self.points[self.current_lane].append(new_point)
                 cv2.imshow("Labeling", self.draw_ui(self.current_image, 
                                                    self.current_idx, 
                                                    len(self.image_files)))
             else:
-                print(f"Maximum number of points ({self.MAX_POINTS}) reached.")
+                print(f"Maximum number of points ({self.MAX_POINTS}) reached for lane {self.current_lane+1}.")
 
         elif event == cv2.EVENT_RBUTTONDOWN:
-            if self.points:
-                self.points.pop()  # Remove the last point
-                print(f"Removed last point, {len(self.points)} remaining.")
+            if self.points[self.current_lane]:
+                self.points[self.current_lane].pop()  # Remove the last point from current lane
+                print(f"Removed last point from lane {self.current_lane+1}, {len(self.points[self.current_lane])} remaining.")
             cv2.imshow("Labeling", self.draw_ui(self.current_image, 
                                                self.current_idx, 
                                                len(self.image_files)))
 
+    def switch_lane(self, increase: bool = True) -> None:
+        """
+        Switch between lanes.
+        
+        Args:
+            increase: If True, increment lane, otherwise decrement
+        """
+        if increase:
+            self.current_lane = (self.current_lane + 1) % self.MAX_LANES
+        else:
+            self.current_lane = (self.current_lane - 1) % self.MAX_LANES
+
+        print(f"Switched to lane {self.current_lane+1}")
+        
+        if self.current_image is not None:
+            cv2.imshow("Labeling", self.draw_ui(self.current_image, 
+                                               self.current_idx, 
+                                               len(self.image_files)))
+    
     def switch_road_type(self, increase: bool = True) -> None:
         """
         Toggle the road type.
@@ -354,22 +410,23 @@ class LabelGUI:
             self.road_type = 0  # Default
         
         # Ensure points are in the correct format and scale from OUTPUT_SIZE to INPUT_SIZE
-        self.points = []
-        for point in loaded_points:
-            try:
-                if len(point) >= 3:
-                    # Scale points from OUTPUT_SIZE to INPUT_SIZE
-                    x = int(float(point[0]) * (self.INPUT_SIZE[0] / self.OUTPUT_SIZE[0]))
-                    y = int(float(point[1]) * (self.INPUT_SIZE[1] / self.OUTPUT_SIZE[1]))
-                    
-                    # Keep other properties like visibility
-                    scaled_point = [x, y, int(float(point[2]))]
-                    if len(point) > 3:
-                        scaled_point.extend(point[3:])
+        self.points = [[] for _ in range(self.MAX_LANES)]
+        for lane_idx, lane_points in enumerate(loaded_points):
+            for point in lane_points:
+                try:
+                    if len(point) >= 3:
+                        # Scale points from OUTPUT_SIZE to INPUT_SIZE
+                        x = int(float(point[0]) * (self.INPUT_SIZE[0] / self.OUTPUT_SIZE[0]))
+                        y = int(float(point[1]) * (self.INPUT_SIZE[1] / self.OUTPUT_SIZE[1]))
                         
-                    self.points.append(scaled_point)
-            except Exception as e:
-                print(f"Error converting point {point}: {e}")
+                        # Keep other properties like visibility
+                        scaled_point = [x, y, int(float(point[2]))]
+                        if len(point) > 3:
+                            scaled_point.extend(point[3:])
+                            
+                        self.points[lane_idx].append(scaled_point)
+                except Exception as e:
+                    print(f"Error converting point {point}: {e}")
         
         # Display the image
         cv2.namedWindow("Labeling")
@@ -395,11 +452,17 @@ class LabelGUI:
                 
             elif key == ord("s"):  # Decrement road type
                 self.switch_road_type(False)
+
+            elif key == ord("e")  or key == ord(" "):  # Next lane
+                self.switch_lane(True)
                 
-            elif key == ord("q"):  # Quit
-                self._save_current_label(image)
-                return None  # Signal to exit the program
-    
+            elif key == ord("q"):  # Previous lane / Quit
+                if key & cv2.EVENT_FLAG_CTRLKEY:  # Ctrl+Q to quit
+                    self._save_current_label(image)
+                    return None  # Signal to exit the program
+                else:
+                    self.switch_lane(False)  # Just Q for previous lane
+
     def _save_current_label(self, image: np.ndarray) -> None:
         """
         Save the current image label.
@@ -412,17 +475,18 @@ class LabelGUI:
             output_image = self._resize_image_preserve_aspect(image, self.OUTPUT_SIZE)
             
             # Scale points from INPUT_SIZE to OUTPUT_SIZE
-            scaled_points = []
-            for point in self.points:
-                x = int(point[0] * (self.OUTPUT_SIZE[0] / self.INPUT_SIZE[0]))
-                y = int(point[1] * (self.OUTPUT_SIZE[1] / self.INPUT_SIZE[1]))
-                scaled_point = [x, y]
-                
-                # Keep the visibility flag and other properties
-                if len(point) > 2:
-                    scaled_point.extend(point[2:])
-                
-                scaled_points.append(scaled_point)
+            scaled_points = [[] for _ in range(self.MAX_LANES)]
+            for lane_idx, lane_points in enumerate(self.points):
+                for point in lane_points:
+                    x = int(point[0] * (self.OUTPUT_SIZE[0] / self.INPUT_SIZE[0]))
+                    y = int(point[1] * (self.OUTPUT_SIZE[1] / self.INPUT_SIZE[1]))
+                    scaled_point = [x, y]
+                    
+                    # Keep the visibility flag and other properties
+                    if len(point) > 2:
+                        scaled_point.extend(point[2:])
+                    
+                    scaled_points[lane_idx].append(scaled_point)
                 
             save_label(os.path.basename(self.image_path), 
                       scaled_points, 

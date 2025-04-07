@@ -15,25 +15,47 @@ def load_label(image_name, output_dir):
             with open(label_path, 'r') as f:
                 data = json.load(f)
             
-            # Extract points and road type from JSON structure
-            points = data.get('points', [])
+            # Extract road type from JSON structure
             road_type = data.get('road_type', 0)
             
-            # Process points with their full data (including angle and distance if available)
-            processed_points = []
-            for point in points:
-                if len(point) >= 3:
-                    new_point = [int(point[0]), int(point[1]), int(point[2])]
-                    # Add angle and distance if available
-                    if len(point) >= 5:
-                        new_point.extend([float(point[3]), float(point[4])])
-                    processed_points.append(new_point)
-            
-            return processed_points, road_type
+            # Check if this is multi-lane format
+            if 'lanes' in data:
+                # Multi-lane format
+                lanes = data.get('lanes', [])
+                processed_lanes = []
+                
+                # Process each lane's points
+                for lane in lanes:
+                    lane_points = []
+                    for point in lane:
+                        if len(point) >= 3:
+                            new_point = [int(point[0]), int(point[1]), int(point[2])]
+                            # Add angle and distance if available
+                            if len(point) >= 5:
+                                new_point.extend([float(point[3]), float(point[4])])
+                            lane_points.append(new_point)
+                    processed_lanes.append(lane_points)
+                
+                return processed_lanes, road_type
+            else:
+                # Legacy single-lane format - convert to multi-lane
+                points = data.get('points', [])
+                processed_points = []
+                
+                for point in points:
+                    if len(point) >= 3:
+                        new_point = [int(point[0]), int(point[1]), int(point[2])]
+                        # Add angle and distance if available
+                        if len(point) >= 5:
+                            new_point.extend([float(point[3]), float(point[4])])
+                        processed_points.append(new_point)
+                
+                # Return as a list with a single lane
+                return [processed_points], road_type
             
         except Exception as e:
             print(f"Error loading {image_name}: {e}")
-            return [], 0
+            return [[] for _ in range(5)], 0  # Return empty lanes for MAX_LANES=5
     else:
         # Try to load from old format for backwards compatibility
         old_label_path = os.path.join(output_dir, image_name.replace(".png", ".txt").replace(".jpg", ".txt"))
@@ -45,11 +67,11 @@ def load_label(image_name, output_dir):
                 
                 # Extract points and road type
                 if data.ndim == 0 or data.size == 0:
-                    return [], 0  # Empty label file
+                    return [[] for _ in range(5)], 0  # Empty label file
 
                 road_type = int(data[-1]) if data.size > 1 else 0  # Extract road type
                 
-                # Process the points
+                # Process the points as a single lane
                 if data.size > 1:
                     points_data = data[:-1]  # All data except the last element (road type)
                     # Ensure points are in groups of 3
@@ -60,22 +82,34 @@ def load_label(image_name, output_dir):
                             points[i] = [int(float(points[i][0])), int(float(points[i][1])), int(float(points[i][2]))]
                         
                         # Save in new format for next time
-                        save_label(image_name, points, road_type, output_dir, None, convert_only=True)
-                        return points, road_type
+                        save_label(image_name, [points], road_type, output_dir, None, convert_only=True)
+                        return [points] + [[] for _ in range(4)], road_type  # One lane with points, rest empty
             except Exception as e:
                 print(f"Error loading legacy format {image_name}: {e}")
                 
         print(f"Label file {label_path} not found.")
-        return [], 0
+        return [[] for _ in range(5)], 0  # Return empty lanes for MAX_LANES=5
 
 
-def save_label(image_name, points, road_type, output_dir, current_image, convert_only=False):
-    """Saves the image and corresponding label (points and road type) in JSON format."""
+def save_label(image_name, lanes, road_type, output_dir, current_image, convert_only=False):
+    """
+    Saves the image and corresponding label (lanes of points and road type) in JSON format.
+    
+    Args:
+        image_name: Name of the image file
+        lanes: List of lanes, where each lane is a list of points
+        road_type: Type of road classification
+        output_dir: Directory to save the output
+        current_image: Image data to save (optional)
+        convert_only: If True, only convert format without overwriting image
+    """
     # Ensure output directory exists
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    if len(points) == 0 and not convert_only:
+    # Check if we have any points in any lanes
+    total_points = sum(len(lane) for lane in lanes)
+    if total_points == 0 and not convert_only:
         print(f"Warning: No points to save for {image_name}")
         return
     
@@ -87,23 +121,27 @@ def save_label(image_name, points, road_type, output_dir, current_image, convert
     # Save the label data as a JSON file with the same name (image_name) in the folder
     label_path = os.path.join(output_dir, image_name.replace(".png", ".json").replace(".jpg", ".json"))
     
-    # Ensure all points are saved with their data (including angle and distance if available)
-    points_to_save = []
-    for point in points:
-        if len(point) >= 5:  # Has angle and distance data
-            points_to_save.append([
-                int(float(point[0])), 
-                int(float(point[1])), 
-                int(float(point[2])),
-                float(point[3]),  # angle
-                float(point[4])   # distance
-            ])
-        else:  # Basic x, y, visibility data
-            points_to_save.append([
-                int(float(point[0])), 
-                int(float(point[1])), 
-                int(float(point[2]))
-            ])
+    # Process all lanes
+    lanes_to_save = []
+    for lane in lanes:
+        # Process points in this lane
+        lane_points = []
+        for point in lane:
+            if len(point) >= 5:  # Has angle and distance data
+                lane_points.append([
+                    int(float(point[0])), 
+                    int(float(point[1])), 
+                    int(float(point[2])),
+                    float(point[3]),  # angle
+                    float(point[4])   # distance
+                ])
+            else:  # Basic x, y, visibility data
+                lane_points.append([
+                    int(float(point[0])), 
+                    int(float(point[1])), 
+                    int(float(point[2]))
+                ])
+        lanes_to_save.append(lane_points)
     
     # Get current date and time
     current_datetime = datetime.datetime.now().isoformat()
@@ -112,7 +150,7 @@ def save_label(image_name, points, road_type, output_dir, current_image, convert
     label_data = {
         "image_name": image_name,
         "creation_date": current_datetime,
-        "points": points_to_save,
+        "lanes": lanes_to_save,
         "road_type": int(road_type)
     }
     
